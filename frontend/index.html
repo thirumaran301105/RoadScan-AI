@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RoadScan AI - Pothole & Road Damage Intelligence</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --bg: #16181a; --panel: #1e2124; --border: #34383c;
+    --text: #eceef0; --muted: #9aa1a8;
+    --minor: #f2c94c; --moderate: #f2a900; --severe: #d62839; --green: #2ecc71;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+  header { padding: 14px 22px; border-bottom: 1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+  header h1 { font-size: 19px; margin: 0; }
+  header .tag { color: var(--muted); font-size: 13px; }
+  .tabs { display: flex; gap: 6px; padding: 10px 22px 0; }
+  .tab-btn { padding: 8px 16px; border-radius: 8px 8px 0 0; border: 1px solid var(--border); border-bottom: none; background: #14161a; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 600; }
+  .tab-btn.active { background: var(--panel); color: var(--text); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .layout { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; padding: 14px 22px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  #map { height: 420px; border-radius: 8px; border: 1px solid var(--border); }
+  .controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items:center; }
+  button { padding: 7px 14px; border-radius: 6px; border: none; background: var(--moderate); color: #1a1500; font-weight: 600; cursor: pointer; font-size: 13px; }
+  button.secondary { background: #2a2e32; color: var(--text); border: 1px solid var(--border); }
+  button.stop { background: var(--severe); color: white; }
+  select, input[type=file], input[type=text] { color: var(--text); background:#0f1113; border:1px solid var(--border); border-radius:6px; font-size: 12px; padding: 5px; }
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  .stat-card { background: #0f1113; border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+  .stat-val { font-size: 20px; font-weight: 700; }
+  .stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10px; }
+  .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+  .badge-minor { background: rgba(242,201,76,.2); color: var(--minor); }
+  .badge-moderate { background: rgba(242,169,0,.2); color: var(--moderate); }
+  .badge-severe { background: rgba(214,40,57,.2); color: var(--severe); }
+  #status { font-size: 12px; color: var(--muted); margin-top: 8px; white-space: pre-wrap; }
+  .repair-btn { padding: 3px 8px; font-size: 10px; background: var(--green); color: #06210f; }
+
+  /* Driver view */
+  #live-feed-img { width: 100%; border-radius: 8px; border: 1px solid var(--border); display:block; background:#000; min-height: 300px; }
+  #alert-banner {
+    display: none; padding: 22px; border-radius: 10px; margin-bottom: 14px;
+    font-size: 24px; font-weight: 800; text-align: center; color: white;
+  }
+  #alert-banner.severe { background: var(--severe); animation: flash 0.6s infinite; }
+  #alert-banner.moderate { background: var(--moderate); color: #1a1500; }
+  #alert-banner.minor { background: #4a4d51; }
+  @keyframes flash { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .live-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .live-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .live-dot.off { background: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🕳️ RoadScan AI</h1>
+  <span class="tag">Pothole & Road Damage Intelligence - continuous detection, driver alerts, repair verification</span>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('driver')">🚗 Driver View</button>
+  <button class="tab-btn" onclick="showTab('dashboard')">🗺️ Management Dashboard</button>
+</div>
+
+<!-- ================= DRIVER VIEW ================= -->
+<div id="tab-driver" class="tab-content active">
+  <div class="layout">
+    <div>
+      <div class="panel">
+        <h2><span class="live-dot off" id="live-dot"></span>Live Camera Signal</h2>
+        <div class="controls">
+          <select id="source-select">
+            <option value="simulated">Simulated feed (no camera needed - test mode)</option>
+            <option value="0">Webcam 0</option>
+            <option value="1">Webcam 1</option>
+          </select>
+          <select id="gps-mode-select">
+            <option value="simulated">Simulated route (demo)</option>
+            <option value="pushed">Phone/browser GPS (real)</option>
+          </select>
+          <select id="live-road-type">
+            <option value="unknown">Road type: unknown</option>
+            <option value="national_highway">National Highway</option>
+            <option value="state_highway">State Highway</option>
+            <option value="arterial_road">Arterial Road</option>
+            <option value="residential_road">Residential Road</option>
+          </select>
+          <button onclick="startLive()">Start Watching</button>
+          <button class="stop secondary" onclick="stopLive()">Stop</button>
+        </div>
+        <div id="alert-banner"></div>
+        <img id="live-feed-img" src="" alt="live camera feed - not started" />
+        <div id="live-status" style="font-size:12px;color:var(--muted);margin-top:8px;">Not started.</div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>This Session</h2>
+        <div class="stat-row">
+          <div class="stat-card"><div class="stat-val" id="live-frames">--</div><div class="stat-lbl">Frames</div></div>
+          <div class="stat-card"><div class="stat-val" id="live-detections">--</div><div class="stat-lbl">Detections</div></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px;">
+        <h2>Recent Alerts</h2>
+        <table><thead><tr><th>Time</th><th>Severity</th><th>Message</th></tr></thead>
+          <tbody id="alert-log"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MANAGEMENT DASHBOARD ================= -->
+<div id="tab-dashboard" class="tab-content">
+  <div class="layout">
+    <div>
+      <div class="panel">
+        <h2>Live Map</h2>
+        <div id="map"></div>
+      </div>
+      <div class="panel" style="margin-top:14px;">
+        <h2>Batch Upload (process already-recorded footage)</h2>
+        <div class="controls">
+          <input type="file" id="gps-file" accept=".csv" title="GPS track CSV" />
+          <input type="file" id="image-files" accept="image/*" multiple title="Images (in order)" />
+          <select id="road-type">
+            <option value="unknown">Road type: unknown</option>
+            <option value="national_highway">National Highway</option>
+            <option value="state_highway">State Highway</option>
+            <option value="arterial_road">Arterial Road</option>
+            <option value="residential_road">Residential Road</option>
+          </select>
+          <button onclick="uploadPass()">Upload Pass</button>
+        </div>
+        <div id="status">For pre-recorded footage instead of a live camera - choose a GPS CSV + images in order.</div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Summary</h2>
+        <div class="stat-row" id="stat-row">
+          <div class="stat-card"><div class="stat-val" id="stat-active">--</div><div class="stat-lbl">Active</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-severe">--</div><div class="stat-lbl">Severe</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-repaired">--</div><div class="stat-lbl">Repaired</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-cost">--</div><div class="stat-lbl">Est. Cost (₹)</div></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px;">
+        <h2>Priority Repair List</h2>
+        <table id="pothole-table">
+          <thead><tr><th>#</th><th>Severity</th><th>Road Type</th><th>Sightings</th><th>Priority</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---------------- Tabs ----------------
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'dashboard') setTimeout(() => map.invalidateSize(), 100);
+}
+
+// ---------------- Map (management dashboard) ----------------
+const map = L.map('map').setView([12.9716, 77.5946], 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(map);
+
+let markers = [];
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function clearMarkers() { markers.forEach(m => map.removeLayer(m)); markers = []; }
+
+const severityColor = { minor: '#f2c94c', moderate: '#f2a900', severe: '#d62839' };
+const statusColor = { confirmed_repaired: '#2ecc71', likely_repaired: '#7fdba0' };
+
+async function refreshAll() {
+  await Promise.all([refreshMap(), refreshStats(), refreshTable()]);
+}
+
+async function refreshMap() {
+  const res = await fetch('/api/potholes/all');
+  if (!res.ok) return;
+  const potholes = await res.json();
+  clearMarkers();
+  potholes.forEach(p => {
+    const color = statusColor[p.status] || severityColor[p.severity] || '#9aa1a8';
+    const marker = L.circleMarker([p.latitude, p.longitude], {
+      radius: 8, color, fillColor: color, fillOpacity: 0.7, weight: 2,
+    }).addTo(map);
+    marker.bindPopup(
+      `<b>Pothole ${p.pothole_id}</b><br/>Severity: ${p.severity}<br/>Status: ${p.status}<br/>` +
+      `Sightings: ${p.sighting_count}<br/>Confidence: ${(p.confidence*100).toFixed(0)}%`
+    );
+    markers.push(marker);
+  });
+  if (potholes.length) map.setView([potholes[0].latitude, potholes[0].longitude], 17);
+}
+
+async function refreshStats() {
+  const res = await fetch('/api/stats');
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById('stat-active').textContent = (s.by_status.active || 0) + (s.by_status.reopened || 0);
+  document.getElementById('stat-severe').textContent = s.active_by_severity.severe || 0;
+  document.getElementById('stat-repaired').textContent = (s.by_status.confirmed_repaired || 0) + (s.by_status.likely_repaired || 0);
+  document.getElementById('stat-cost').textContent = s.total_estimated_active_repair_cost_inr.toLocaleString('en-IN');
+}
+
+async function refreshTable() {
+  const res = await fetch('/api/potholes');
+  if (!res.ok) return;
+  const potholes = await res.json();
+  const tbody = document.querySelector('#pothole-table tbody');
+  tbody.innerHTML = '';
+  potholes.forEach((p, i) => {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${i+1}</td>` +
+      `<td><span class="badge badge-${p.severity}">${p.severity}</span></td>` +
+      `<td>${p.road_type}</td><td>${p.sighting_count}</td><td>${p.priority_score}</td>` +
+      `<td><button class="repair-btn" onclick="markRepaired('${p.pothole_id}')">Mark Repaired</button></td>`;
+    tbody.appendChild(row);
+  });
+}
+
+async function markRepaired(id) {
+  await fetch(`/api/potholes/${id}/mark_repaired`, { method: 'POST' });
+  await refreshAll();
+}
+
+async function uploadPass() {
+  const gpsFile = document.getElementById('gps-file').files[0];
+  const imageFiles = document.getElementById('image-files').files;
+  const roadType = document.getElementById('road-type').value;
+  if (!gpsFile || !imageFiles.length) { setStatus('Choose both a GPS CSV and image files.'); return; }
+
+  setStatus('Uploading and running detection...');
+  const form = new FormData();
+  form.append('gps_csv', gpsFile);
+  for (const f of imageFiles) form.append('images', f);
+  form.append('road_type', roadType);
+
+  try {
+    const res = await fetch('/api/upload_pass', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) { setStatus(`Error: ${data.detail}`); return; }
+    setStatus(
+      `Pass ${data.pass_id}: ${data.n_frames_processed} frames processed, ` +
+      `${data.n_raw_detections} detections, ${data.n_new_potholes} new, ` +
+      `${data.n_updated_potholes} re-sighted, ${data.n_marked_likely_repaired} marked likely repaired.\n` +
+      (data.warnings.length ? `Warnings: ${data.warnings.join(' ')}` : '')
+    );
+    await refreshAll();
+  } catch (e) {
+    setStatus(`Upload failed: ${e.message}`);
+  }
+}
+
+// ---------------- Driver View: live capture ----------------
+let liveRunning = false;
+let liveWs = null;
+let gpsPushInterval = null;
+let statsPollInterval = null;
+
+function beep(urgent) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = urgent ? 880 : 550;
+    gain.gain.value = 0.15;
+    osc.start();
+    setTimeout(() => { osc.stop(); ctx.close(); }, urgent ? 350 : 200);
+  } catch (e) { /* audio not available - alert still shows visually */ }
+}
+
+function showAlertBanner(alert) {
+  const banner = document.getElementById('alert-banner');
+  banner.className = alert.severity;
+  banner.textContent = `⚠️ ${alert.message}`;
+  banner.style.display = 'block';
+  beep(alert.urgent);
+  setTimeout(() => { banner.style.display = 'none'; }, 5000);
+
+  const log = document.getElementById('alert-log');
+  const row = document.createElement('tr');
+  const t = new Date(alert.timestamp * 1000).toLocaleTimeString();
+  row.innerHTML = `<td>${t}</td><td><span class="badge badge-${alert.severity}">${alert.severity}</span></td><td>${alert.message}</td>`;
+  log.prepend(row);
+}
+
+async function startLive() {
+  const source = document.getElementById('source-select').value;
+  const gpsMode = document.getElementById('gps-mode-select').value;
+  const roadType = document.getElementById('live-road-type').value;
+
+  const form = new FormData();
+  form.append('source', source);
+  form.append('gps_mode', gpsMode);
+  form.append('road_type', roadType);
+
+  const res = await fetch('/api/live/start', { method: 'POST', body: form });
+  const data = await res.json();
+  if (!res.ok) { document.getElementById('live-status').textContent = `Error: ${data.detail}`; return; }
+
+  liveRunning = true;
+  document.getElementById('live-dot').className = 'live-dot on';
+  document.getElementById('live-status').textContent = `Watching (source: ${source}, GPS: ${gpsMode})...`;
+  document.getElementById('live-feed-img').src = '/live_feed?t=' + Date.now();
+
+  if (gpsMode === 'pushed' && navigator.geolocation) {
+    gpsPushInterval = setInterval(() => {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const form2 = new FormData();
+        form2.append('latitude', pos.coords.latitude);
+        form2.append('longitude', pos.coords.longitude);
+        fetch('/api/gps_update', { method: 'POST', body: form2 });
+      });
+    }, 3000);
+  }
+
+  connectLiveWs();
+  statsPollInterval = setInterval(pollLiveStats, 2000);
+}
+
+async function stopLive() {
+  await fetch('/api/live/stop', { method: 'POST' });
+  liveRunning = false;
+  document.getElementById('live-dot').className = 'live-dot off';
+  document.getElementById('live-status').textContent = 'Stopped.';
+  document.getElementById('live-feed-img').src = '';
+  if (liveWs) liveWs.close();
+  if (gpsPushInterval) clearInterval(gpsPushInterval);
+  if (statsPollInterval) clearInterval(statsPollInterval);
+}
+
+function connectLiveWs() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  liveWs = new WebSocket(`${protocol}://${location.host}/ws/live`);
+  liveWs.onmessage = (event) => {
+    const alert = JSON.parse(event.data);
+    if (alert.type === 'pothole_alert') showAlertBanner(alert);
+  };
+  liveWs.onclose = () => { if (liveRunning) setTimeout(connectLiveWs, 2000); };
+}
+
+async function pollLiveStats() {
+  const res = await fetch('/api/live/status');
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById('live-frames').textContent = s.frames_processed ?? '--';
+  document.getElementById('live-detections').textContent = s.detections_this_session ?? '--';
+}
+
+refreshAll();
+</script>
+</body>
+</html>

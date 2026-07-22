@@ -1,0 +1,14 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+opencv-python-headless==4.10.0.84
+ultralytics==8.2.103
+dill==0.3.8
+pandas==2.2.2
+numpy==1.26.4
+Pillow==10.4.0
+pydantic==2.9.2
+python-multipart==0.0.9
+requests==2.32.3
+
+# Dev/test only (used by backend/test_live_pipeline.py, test_frame_stream_ws.py)
+websockets==13.1
